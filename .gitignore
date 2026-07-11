@@ -1,0 +1,11 @@
+# 가상환경/캐시
+.venv/
+__pycache__/
+*.py[cod]
+
+# 기출 원본 PDF·문항 이미지·DB - 평가원/교육청 저작물이므로 저장소에 올리지 않는다.
+# 배포 후 bootstrap_bank / acquire_exam 도구로 공식 사이트에서 직접 수집한다.
+data/
+
+# 생성 산출물
+scripts/smoke_output.html
