@@ -632,9 +632,13 @@ CORE_TOOLS = {
 }
 
 if os.environ.get("GICHUL_CORE_TOOLS", "").lower() in ("1", "true", "yes"):
-    for _name in list(mcp._tool_manager._tools):
-        if _name not in CORE_TOOLS:
-            del mcp._tool_manager._tools[_name]
+    try:
+        for _name in list(mcp._tool_manager._tools):
+            if _name not in CORE_TOOLS:
+                del mcp._tool_manager._tools[_name]
+    except AttributeError:
+        # SDK 내부 구조가 바뀌면 필터를 포기하고 전체 도구를 노출한다 - 기동 실패보다 낫다
+        pass
 
 
 if __name__ == "__main__":
