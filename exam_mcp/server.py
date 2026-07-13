@@ -16,7 +16,7 @@ from .acquisition import plan_acquisition as _plan_acquisition
 from .discover import incheon_attachments, list_attachments, list_board, list_hakpyeong, list_incheon
 from .ingest.fetch import extract_pdfs
 from .exam_builder import build_exam
-from .ingest.answers import apply_answers, apply_triplets
+from .ingest.answers import apply_answers, apply_answers_text, apply_triplets
 from .ingest.fetch import SecurityError, fetch, manifest_url_for
 from .ingest.split_pdf import split_pdf
 from .render import render_html
@@ -298,8 +298,9 @@ def bootstrap_bank(n_exams: int = 3) -> str:
         return "평가원 게시판에서 수학 게시글을 찾지 못했습니다. 게시판 구조가 바뀌었을 수 있습니다."
     results.append(
         f"완료: 수능 {found}개 처리. list_exams()로 확인 후 generate_exam(grade=3)으로 "
-        "문제지를 만들 수 있습니다 (난이도는 배치 기반 잠정치로 즉시 사용 가능). "
-        "정답표 자동 파싱이 실패한 시험은 view_answer_sheet로 정답표를 읽고 set_answers로 입력하세요."
+        "즉시 문제지를 만들 수 있습니다 (배점·난이도는 문제지 본문에서 자동 추출됨). "
+        "정답표 자동 파싱이 실패한 시험은 사용자에게 정답 목록(예: 1③ 2⑤ …)을 "
+        "붙여넣어 달라고 요청한 뒤 그 텍스트를 그대로 set_answers_text에 넘기세요."
     )
     return "\n".join(results)
 
@@ -431,6 +432,22 @@ def set_answers(exam_id: int, answers_json: str) -> str:
     data = json.loads(answers_json)
     triplets = {int(k): (str(v[0]), int(v[1])) for k, v in data.items()}
     return apply_triplets(exam_id, triplets)
+
+
+@mcp.tool()
+def set_answers_text(exam_id: int, text: str) -> str:
+    """사용자가 붙여넣은 정답 목록 텍스트를 그대로 전달하면 서버가 해석해 입력한다.
+
+    JSON으로 바꾸거나 형식을 정리할 필요 없음 - 받은 텍스트를 가공 없이 넘기면 된다.
+    "1③ 2⑤ 3④ …", "1번 3, 2번 5", 정답표 표 복사본(번호 정답 배점) 모두 허용.
+    배점이 포함돼 있으면 배점까지, 아니면 정답만 기록한다(배점은 기존 값 유지).
+    응답에 해석 결과가 들어 있으니 사용자에게 보여주고 확인받을 것.
+
+    Args:
+        exam_id: list_exams의 시험 id
+        text: 사용자가 붙여넣은 정답 목록 원문
+    """
+    return apply_answers_text(exam_id, text)
 
 
 @mcp.tool()

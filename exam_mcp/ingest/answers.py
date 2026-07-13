@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pymupdf
@@ -105,6 +107,84 @@ def apply_answers(exam_id: int, pdf_path: Path) -> str:
     if not triplets:
         return (
             "[정답 자동 입력 실패] 정답표에 텍스트 레이어가 없습니다(벡터/스캔 PDF). "
-            "view_answer_sheet로 정답표를 읽고 set_answers로 입력하세요."
+            "사용자에게 정답 목록(예: 1③ 2⑤ 3④ …)을 붙여넣어 달라고 요청해 "
+            "set_answers_text로 입력하세요."
         )
     return apply_triplets(exam_id, triplets)
+
+
+def _walk_triplets(tokens: list[str]) -> dict[int, tuple[str, int]]:
+    """토큰 열에서 [번호][정답][배점 2/3/4] 패턴을 수집한다 (정답표 표 구조)."""
+    result: dict[int, tuple[str, int]] = {}
+    i = 0
+    while i < len(tokens) - 2:
+        num = _as_int(tokens[i])
+        if num is not None and 1 <= num <= 30:
+            a = _as_int(tokens[i + 1])
+            ans = str(a) if a is not None and 0 <= a <= 999 else None
+            pts = _as_int(tokens[i + 2])
+            if ans is not None and pts in (2, 3, 4):
+                result.setdefault(num, (ans, pts))
+                i += 3
+                continue
+        i += 1
+    return result
+
+
+def _walk_pairs(tokens: list[str]) -> dict[int, str]:
+    """토큰 열에서 (번호, 정답) 교대 패턴을 수집한다. 번호는 1부터 오름차순이어야 한다."""
+    result: dict[int, str] = {}
+    expected = 1
+    i = 0
+    while i < len(tokens) - 1:
+        if tokens[i] == str(expected):
+            a = _as_int(tokens[i + 1])
+            if a is not None and 0 <= a <= 999:
+                result[expected] = str(a)
+                expected += 1
+                i += 2
+                continue
+        i += 1
+    return result
+
+
+def apply_answers_text(exam_id: int, text: str) -> str:
+    """자유 형식 정답 텍스트를 해석해 기록한다 - 형식 파악은 전부 서버가 한다.
+
+    "1③ 2⑤ …", "1번 3, 2번 5", 표 복사본(번호 정답 배점) 모두 허용.
+    배점이 포함된 3열 형식이면 배점까지, 아니면 정답만 기록한다
+    (배점은 문제지 본문에서 추출된 기존 값 유지).
+    """
+    # 원문자 정답(①~⑤)을 숫자로 바꾸고 숫자 토큰만 추출 - "1③"처럼 붙어 있어도 분리된다
+    tokens = [CIRCLED.get(t, t) for t in re.findall(r"[①②③④⑤]|\d+", text)]
+
+    # 1) 배점 포함 3열 형식 시도 (완전 검증 통과 시에만 채택)
+    triplets = _walk_triplets(tokens)
+    if triplets and not validate(triplets):
+        return apply_triplets(exam_id, triplets)
+
+    # 2) (번호, 정답) 쌍 형식 - 정답만 기록
+    pairs = _walk_pairs(tokens)
+    conn = dbm.connect()
+    nums = [r["number"] for r in conn.execute(
+        "SELECT number FROM problems WHERE exam_id=? ORDER BY number", (exam_id,))]
+    if not nums:
+        return f"[정답 입력 실패] 시험 id={exam_id}에 등록된 문항이 없습니다."
+    missing = [n for n in nums if n not in pairs]
+    if missing:
+        return (
+            f"[정답 입력 실패] 해석 결과 빠진 문항이 있습니다: {missing}. "
+            f"해석된 정답: {json.dumps(pairs, ensure_ascii=False)}. "
+            "'1③ 2⑤ …'처럼 번호-정답 순서로 다시 붙여넣어 주세요. DB에 쓰지 않았습니다."
+        )
+    for num in nums:
+        conn.execute(
+            "UPDATE problems SET answer=? WHERE exam_id=? AND number=?",
+            (pairs[num], exam_id, num),
+        )
+    conn.commit()
+    echo = " ".join(f"{n}:{pairs[n]}" for n in nums)
+    return (
+        f"[정답 입력] {len(nums)}문항 (정답만 기록, 배점·난이도는 기존 값 유지)\n"
+        f"해석 결과를 사용자에게 확인받으세요 → {echo}"
+    )

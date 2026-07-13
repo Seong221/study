@@ -23,6 +23,7 @@ from .. import db as dbm
 from .answers import provisional_difficulty
 
 NUM_RE = re.compile(r"^(\d{1,2})\s*\.")
+POINTS_RE = re.compile(r"\[\s*([234])\s*점\s*\]")  # 문항 본문의 "[3점]" 배점 표기
 MAX_PROBLEM_NO = 30
 HEADER_MARGIN = 130  # 페이지 상단 머리글(교시/홀짝형 표기) 제외
 FOOTER_MARGIN = 110  # 하단 쪽번호·저작권 문구 제외
@@ -76,6 +77,8 @@ def split_pdf(
 
     expected = 1  # 문항 번호는 읽기 순서상 증가해야 함 (오탐 제거)
     saved = 0
+    n_pts = 0
+    pts_sum = 0
     for page_idx in range(start_page - 1, len(doc)):
         page = doc[page_idx]
         mid_x = page.rect.width / 2
@@ -99,19 +102,30 @@ def split_pdf(
             pix = page.get_pixmap(matrix=pymupdf.Matrix(ZOOM, ZOOM), clip=clip)
             img_name = f"{exam_id}/{no:02d}.png"
             pix.save(dbm.DATA_DIR / "problems" / img_name)
+            # 배점은 문항 본문의 "[N점]" 표기에서 추출한다 - 정답표가 파싱 불가여도 채워진다
+            m = POINTS_RE.search(page.get_text("text", clip=clip))
+            pts = int(m.group(1)) if m else None
+            if pts:
+                n_pts += 1
+                pts_sum += pts
             # 잠정 난이도를 등록 시점에 부여한다 - 정답표 파싱이 실패해도 문제지 생성이
-            # 가능해야 하므로. 실측 정답률·정답표 기반 난이도가 있으면 유지한다.
+            # 가능해야 하므로. 정답표·실측 정답률 기반 값이 이미 있으면 유지한다.
             conn.execute(
-                """INSERT INTO problems (exam_id, number, image_path, difficulty) VALUES (?,?,?,?)
+                """INSERT INTO problems (exam_id, number, image_path, difficulty, points)
+                   VALUES (?,?,?,?,?)
                    ON CONFLICT(exam_id, number) DO UPDATE SET
                        image_path=excluded.image_path,
-                       difficulty=COALESCE(problems.difficulty, excluded.difficulty)""",
-                (exam_id, no, img_name, provisional_difficulty(no)),
+                       difficulty=COALESCE(problems.difficulty, excluded.difficulty),
+                       points=COALESCE(problems.points, excluded.points)""",
+                (exam_id, no, img_name, provisional_difficulty(no), pts),
             )
             saved += 1
             expected = no + 1
     conn.commit()
     print(f"[완료] 시험 id={exam_id}: 문항 {saved}개 분리 → {out_dir}")
+    print(f"[배점] 문제지 본문에서 {n_pts}/{saved}문항 배점 추출 (합계 {pts_sum}점)")
+    if saved and (n_pts < saved or pts_sum != 100):
+        print("[주의] 배점 추출이 불완전합니다. 정답표 파싱이나 set_answers_text로 보완하세요.")
     if saved < 20:
         print("[주의] 분리된 문항이 적습니다. PDF 레이아웃이 다르거나 스캔본일 수 있으니 이미지를 확인하세요.")
     return exam_id
