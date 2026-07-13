@@ -26,6 +26,20 @@ if __name__ == "__main__":
     if args.http:
         mcp.settings.host = args.host
         mcp.settings.port = args.port
+        # SDK의 DNS 리바인딩 방어는 localhost 계열 Host 헤더만 허용해서, 공개 도메인
+        # (PlayMCP 인그레스) 뒤에서는 모든 요청이 421 Invalid Host header로 거부된다.
+        # 이 방어는 로컬에서 도는 서버용이므로 HTTP 모드에서는 끈다.
+        # 특정 호스트만 허용하려면 GICHUL_ALLOWED_HOSTS=host1,host2 로 지정.
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        allowed = os.environ.get("GICHUL_ALLOWED_HOSTS")
+        if allowed:
+            hosts = [h.strip() for h in allowed.split(",") if h.strip()]
+            mcp.settings.transport_security = TransportSecuritySettings(allowed_hosts=hosts)
+        else:
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            )
         mcp.run(transport="streamable-http")
     else:
         mcp.run()
