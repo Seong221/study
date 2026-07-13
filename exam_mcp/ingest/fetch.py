@@ -20,6 +20,8 @@ import hashlib
 import json
 import re
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +58,31 @@ AUTO_ACTION_MARKERS = [b"/OpenAction", b"/AA"]
 
 class SecurityError(Exception):
     pass
+
+
+RETRIES = 3
+
+
+def open_with_retry(req: urllib.request.Request, timeout: int):
+    """일시적 네트워크 오류에 재시도하는 urlopen.
+
+    클라우드 환경에서 평가원 사이트로의 SSL 핸드셰이크가 간헐적으로 타임아웃되는
+    문제가 관찰됨 - 사람이면 다시 시도하지만 약한 AI 클라이언트는 포기하므로
+    서버 안에서 흡수한다. 4xx 응답은 재시도해도 소용없으니 즉시 올린다.
+    """
+    last: Exception | None = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code < 500:
+                raise
+            last = e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last = e
+        if attempt < RETRIES:
+            time.sleep(2 * attempt)
+    raise last
 
 
 # zip 내부에 허용되는 문서 확장자 (실행 가능한 것은 전부 거부)
@@ -178,7 +205,7 @@ def fetch(url: str, name: str | None = None) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (gichul-mcp exam fetcher)"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with open_with_retry(req, timeout=60) as resp:
         # 리다이렉트로 화이트리스트 밖으로 나가는 것 차단
         check_domain(resp.url)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:

@@ -215,6 +215,8 @@ def plan_acquisition(year: int, month: int, grade: int) -> str:
 def discover_exams(page: int = 1) -> str:
     """평가원 수능 기출문제 게시판을 탐색해 학년도·영역별 게시글 목록을 반환한다.
 
+    이 게시판에는 고3 수능(11월)만 있다 - 모의평가·학평·고1·고2 시험은 여기 없으니
+    그런 요청은 plan_acquisition(year, month, grade)을 먼저 호출해 경로를 확인할 것.
     학년도 N = 시행 (N-1)년 11월. 다운로드하려면 board_seq를 acquire_exam에 넘긴다.
     """
     posts = list_board(page)
@@ -293,8 +295,10 @@ def bootstrap_bank(n_exams: int = 3) -> str:
 
     평가원 기출 게시판에서 최신 학년도부터 '수학' 게시글 n_exams개를 찾아
     acquire_exam 파이프라인(다운로드→문항 분리→정답 등록)을 차례로 실행한다.
-    이미 등록된 시험은 자동으로 건너뛰므로 여러 번 호출해도 안전하다.
-    학평(교육청) 문제지는 EBSi 수동 경로라 포함되지 않는다 - plan_acquisition 참고.
+    이미 등록된 시험은 자동으로 건너뛰므로 여러 번 호출해도 안전하고,
+    네트워크 오류로 실패하면 같은 호출을 다시 시도하면 된다.
+    수집되는 것은 고3 수능뿐이다 - 모의평가·학평·고1·고2 시험은
+    plan_acquisition(year, month, grade)으로 경로를 확인할 것.
 
     generate_exam은 같은 학년의 서로 다른 시험 3개 이상을 요구하므로
     n_exams는 3 이상이어야 한다 (수능은 모두 고3).
@@ -508,9 +512,15 @@ def generate_exam(
     conn = _conn()
     built = build_exam(conn, grade=grade, count=count, units=units, source=source, seed=seed)
     if not built.problems:
-        if built.notes:
-            return " ".join(built.notes)
-        return "조건에 맞는 문제가 없습니다. list_exams / frequency_stats로 보유 현황을 확인하세요."
+        base = " ".join(built.notes) if built.notes else "조건에 맞는 문제가 없습니다."
+        if grade == 3:
+            base += (" 다음: bootstrap_bank()를 호출하면 최근 수능 3개(고3 수학)가 자동 수집됩니다. "
+                     "네트워크 오류가 나면 같은 호출을 다시 시도하세요. 수집이 끝나면 이 도구를 다시 호출하세요.")
+        else:
+            base += (f" 고{grade} 학평 문제지는 교육청이 공개 배포하지 않아 자동 수집이 불가능합니다. "
+                     f"plan_acquisition(year=<시행연도>, month=<월>, grade={grade})를 호출하면 나오는 "
+                     "'사용자_안내문'을 사용자에게 그대로 전달하세요.")
+        return base
 
     # 출처 수집: 선택된 문제들이 속한 원시험 + 다운로드한 공식 사이트
     exam_ids = sorted({

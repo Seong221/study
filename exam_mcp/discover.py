@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import urllib.request
 
-from .ingest.fetch import check_domain
+from .ingest.fetch import check_domain, open_with_retry
 
 BOARD_BASE = "https://www.suneung.re.kr/boardCnts"
 BOARD_ID = "1500234"  # 기출문제 게시판
@@ -17,10 +17,10 @@ MAX_HTML = 2 * 1024 * 1024  # 게시판 HTML 크기 상한 2MB
 
 
 def http_get(url: str) -> str:
-    """화이트리스트 검증 후 HTML을 가져온다."""
+    """화이트리스트 검증 후 HTML을 가져온다 (일시적 네트워크 오류는 자동 재시도)."""
     check_domain(url)
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (gichul-mcp exam fetcher)"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with open_with_retry(req, timeout=30) as resp:
         check_domain(resp.url)
         data = resp.read(MAX_HTML)
     return data.decode("utf-8", errors="replace")
