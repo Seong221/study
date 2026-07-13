@@ -72,12 +72,17 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
             "요청": req,
             "분류": f"평가원 {month}월 모의평가 ({hakneyndo}학년도, 평가원 주관)",
             "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 {month}월 시행 = {hakneyndo}학년도 모평.",
-            "자동_수집": "부분 자동 - 평가원 게시판에 게시글이 있으면 전부 자동, 없으면 문제지는 EBSi 수동",
+            "자동_수집": "불가 - 평가원 수능 홈페이지에 모의평가 문제지 게시판이 없음(2026-07 확인). "
+                       "문제지는 EBSi 로그인 다운로드만 가능",
+            "사용자_안내문": (
+                f"{hakneyndo}학년도 {month}월 모의평가({year}년 {month}월 시행) 문제지는 "
+                f"평가원이 공개 게시하지 않아 제가 직접 가져올 수 없어요. "
+                f"EBSi 기출문제실({EBSI_URL})에서 무료 로그인 후 바로 내려받을 수 있습니다. "
+                "이 안내문을 사용자에게 그대로 전달하세요."
+            ),
             "절차": [
-                f"1. [자동] discover_exams()로 {hakneyndo}학년도 {month}월 모의평가 게시글이 있는지 확인",
-                "2. [자동] 게시글이 있으면: 첨부 PDF의 url을 acquire_hakpyeong_file(url, name)로 받은 뒤 "
-                f"ingest_local_pdf(filename=<name>, source='KICE', year={year}, month={month}, grade=3)로 등록",
-                "3. 게시글이 없으면 아래 EBSi 수동 경로:",
+                "1. 위 '사용자_안내문'을 사용자에게 그대로 전달 (다운로드는 사용자 본인이 EBSi에서)",
+                "2. (로컬 서버 운영자 전용) 받은 PDF를 문제은행에 등록하려면:",
                 *_ebsi_manual_steps(year, month, 3, source="KICE"),
             ],
         }
@@ -88,6 +93,11 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
             "요청": req,
             "분류": f"전국연합학력평가 (학평, 교육청 주관){note}",
             "자동_수집": "부분 자동 - 정답표·해설·통계는 자동, 문제지 원본은 사용자가 EBSi에서 직접",
+            "사용자_안내문": (
+                f"{year}년 {month}월 고{grade} 학력평가 문제지는 교육청이 공개 배포하지 않아 "
+                f"제가 직접 가져올 수 없어요. EBSi 기출문제실({EBSI_URL})에서 무료 로그인 후 "
+                "바로 내려받을 수 있습니다. 이 안내문을 사용자에게 그대로 전달하세요."
+            ),
             "절차": [
                 "① 문제지 (저작권 정책상 교육청 공개 배포 없음 → 사용자 직접):",
                 *_ebsi_manual_steps(year, month, grade, source="OFFICE"),

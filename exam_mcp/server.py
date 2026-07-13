@@ -250,7 +250,7 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
         return "문제지/정답표 PDF가 없습니다. 첨부 목록: " + json.dumps(attachments, ensure_ascii=False)
 
     results = []
-    exam_pdf = answers_pdf = exam_url = None
+    exam_pdf = answers_pdf = exam_url = answers_url = None
     for a in targets:
         name = f"{hakneyndo}_{a['filename']}"
         dest = dbm.DATA_DIR / "raw" / name
@@ -266,7 +266,7 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
         if "문제지" in a["filename"]:
             exam_pdf, exam_url = dest, a["url"]
         elif "정답" in a["filename"]:
-            answers_pdf = dest
+            answers_pdf, answers_url = dest, a["url"]
 
     if auto_split and exam_pdf:
         exam_id = split_pdf(exam_pdf, source="KICE", year=hakneyndo - 1, month=11, grade=3,
@@ -277,6 +277,11 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
         )
         if answers_pdf:
             results.append(apply_answers(exam_id, answers_pdf))
+        links = [f"문제지 {exam_url}"] + ([f"정답표 {answers_url}"] if answers_url else [])
+        results.append(
+            "[공식 다운로드 링크] " + " · ".join(links)
+            + " ← 사용자가 원본 PDF를 원하면 이 평가원 공식 링크를 그대로 전달하세요."
+        )
         results.append("다음: 문제지가 필요하면 generate_exam(grade=3)을 호출하세요.")
 
     return "\n".join(results)
