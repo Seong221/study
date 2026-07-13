@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import Context, FastMCP, Image
 
 from . import db as dbm
 from .acquisition import plan_acquisition as _plan_acquisition
@@ -42,6 +42,23 @@ mcp = FastMCP(
 
 def _conn():
     return dbm.connect()
+
+
+def _public_base(ctx: Context | None) -> str:
+    """문제지 공개 링크의 베이스 URL: 환경변수 우선, 없으면 요청 Host 헤더에서 자동 감지."""
+    env = os.environ.get("GICHUL_PUBLIC_URL", "").rstrip("/")
+    if env:
+        return env
+    try:
+        req = ctx.request_context.request  # streamable HTTP 모드일 때만 존재
+        host = req.headers.get("x-forwarded-host") or req.headers.get("host")
+        if not host:
+            return ""
+        local = host.split(":")[0] in ("localhost", "127.0.0.1")
+        scheme = req.headers.get("x-forwarded-proto") or ("http" if local else "https")
+        return f"{scheme}://{host}"
+    except Exception:
+        return ""
 
 
 @mcp.tool()
@@ -295,6 +312,9 @@ def bootstrap_bank(n_exams: int = 3) -> str:
 
     평가원 기출 게시판에서 최신 학년도부터 '수학' 게시글 n_exams개를 찾아
     acquire_exam 파이프라인(다운로드→문항 분리→정답 등록)을 차례로 실행한다.
+    빈 문제은행에서의 첫 실행은 다운로드·문항 분리에 1~3분이 걸려 클라이언트에
+    타임아웃 오류("error while calling tool" 등)가 표시될 수 있다. 그 경우 같은
+    호출을 한 번 더 하면 이미 받은 파일은 건너뛰고 이어서 완료된다.
     이미 등록된 시험은 자동으로 건너뛰므로 여러 번 호출해도 안전하고,
     네트워크 오류로 실패하면 같은 호출을 다시 시도하면 된다.
     수집되는 것은 고3 수능뿐이다 - 모의평가·학평·고1·고2 시험은
@@ -487,14 +507,18 @@ def generate_exam(
     count: int = 20,
     units: list[str] | None = None,
     source: str | None = None,
-    show_difficulty: bool = False,
+    show_difficulty: bool = True,
     show_frequency: bool = False,
-    mark_ramp: bool = False,
+    mark_ramp: bool = True,
     title: str | None = None,
     seed: int | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """평가원 스타일 문제지를 생성한다. 기출에서 난이도 곡선(쉬움→어려움)에 맞춰 선별하고
     HTML 문제지 파일로 저장한 뒤, 구성 요약과 파일 경로를 반환한다.
+
+    응답의 '문제지 URL'을 사용자에게 그대로 전달하면 브라우저에서 열람·인쇄할 수 있다.
+    '문제지 URL'이 '없음'이면 사용자에게 다운로드 링크가 있다고 안내하지 말 것.
 
     문제지는 반드시 서로 다른 시험 3개 이상에서 구성되며, 조건에 맞는 시험이
     3개 미만이면 생성을 거부한다. 각 문항 아래에는 출처(원 시험·번호)가 항상 표시된다.
@@ -504,9 +528,9 @@ def generate_exam(
         count: 문항 수
         units: 대단원 필터 (예: ['이차함수', '도형의 방정식'])
         source: 'KICE'(평가원만) / 'OFFICE'(학평만) / None(전체)
-        show_difficulty: 문항마다 난이도 배지 표시
+        show_difficulty: 문항마다 난이도 배지 표시 (기본 켜짐)
         show_frequency: 문항마다 유형 출제율 배지 표시
-        mark_ramp: 난이도가 올라가는 지점을 문제지에 표시
+        mark_ramp: 난이도 구간(하/중/상)의 시작 지점을 문제지에 표시 (기본 켜짐)
         seed: 재현용 랜덤 시드
     """
     conn = _conn()
@@ -550,10 +574,15 @@ def generate_exam(
         n += 1
     out_path.write_text(html_doc, encoding="utf-8")
 
-    public_base = os.environ.get("GICHUL_PUBLIC_URL", "").rstrip("/")
+    public_base = _public_base(ctx)
+    exam_url = (
+        f"{public_base}/exams/{out_path.name}" if public_base
+        else "없음 - 공개 링크를 만들 수 없는 실행 환경입니다. '문제지 파일'은 서버 내부 경로이니 "
+             "사용자에게 다운로드 링크가 있다고 안내하지 마세요."
+    )
     summary = {
         "문제지 파일": str(out_path),
-        **({"문제지 URL": f"{public_base}/exams/{out_path.name}"} if public_base else {}),
+        "문제지 URL": exam_url,
         "출처": [
             f"{s['title']} — {s['site']}" + (f" ({s['url']})" if s["url"] else "")
             for s in sources
