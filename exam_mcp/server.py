@@ -51,12 +51,14 @@ def _public_base(ctx: Context | None) -> str:
         return env
     try:
         req = ctx.request_context.request  # streamable HTTP 모드일 때만 존재
-        host = req.headers.get("x-forwarded-host") or req.headers.get("host")
+        # 프록시 체인이 x-forwarded-host를 쉼표 목록으로 이어붙일 수 있다 - 첫 항목만 사용
+        raw = req.headers.get("x-forwarded-host") or req.headers.get("host") or ""
+        host = raw.split(",")[0].strip()
         if not host:
             return ""
+        # 내부 프록시 구간이 http라 x-forwarded-proto를 신뢰할 수 없다 - 공개 호스트는 https 고정
         local = host.split(":")[0] in ("localhost", "127.0.0.1")
-        scheme = req.headers.get("x-forwarded-proto") or ("http" if local else "https")
-        return f"{scheme}://{host}"
+        return f"{'http' if local else 'https'}://{host}"
     except Exception:
         return ""
 
