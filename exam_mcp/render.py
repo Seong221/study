@@ -25,11 +25,11 @@ def render_html(
     show_difficulty: bool = False,
     show_frequency: bool = False,
     mark_ramp: bool = False,
-    show_source: bool = False,
     sources: list[dict] | None = None,  # [{"title", "site", "url"}] 출처 표기 (항상 문서 하단에)
 ) -> str:
     parts: list[str] = []
     parts.append(f"""
+<meta charset="utf-8">
 <style>
   body {{ font-family: 'Malgun Gothic', sans-serif; max-width: 800px; margin: 0 auto; padding: 24px; }}
   .head {{ border: 2px solid #000; padding: 16px 20px; margin-bottom: 24px; }}
@@ -39,13 +39,19 @@ def render_html(
   .prob .no {{ font-weight: bold; font-size: 17px; }}
   .badge {{ display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px;
             color: #fff; margin-left: 6px; vertical-align: 2px; }}
-  .ramp {{ border-top: 2px dashed #b71c1c; color: #b71c1c; font-size: 13px;
+  .ramp {{ border-top: 2px dashed; font-size: 13px; font-weight: bold;
            padding-top: 4px; margin: 28px 0 20px; }}
   .src {{ color: #888; font-size: 11px; margin-top: 4px; }}
   img.problem {{ max-width: 100%; display: block; margin-top: 8px; }}
   .missing {{ color: #999; font-style: italic; margin-top: 8px; }}
-  @media print {{ .prob {{ break-inside: avoid; }} }}
+  .print-btn {{ position: fixed; top: 16px; right: 16px; padding: 8px 18px; font-size: 14px;
+                font-family: inherit; border: 1px solid #333; background: #fff;
+                border-radius: 6px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.15); }}
+  .print-btn:hover {{ background: #eee; }}
+  @media print {{ .prob {{ break-inside: avoid; }} .print-btn {{ display: none; }} }}
 </style>
+<title>{html.escape(title)}</title>
+<button class="print-btn" onclick="window.print()">&#128424; 인쇄</button>
 <div class="head">
   <h1>{html.escape(title)}</h1>
   <div class="sub">총 {len(built.problems)}문항 · 기출 재구성</div>
@@ -53,12 +59,17 @@ def render_html(
 """)
 
     ramp_positions = {v: k for k, v in built.ramp_points.items()} if mark_ramp else {}
+    if mark_ramp and built.problems:
+        # 첫 문항의 구간('하')도 표시한다. 하 문항이 없으면 첫 전환점이 1번이므로 덮어쓰지 않는다.
+        ramp_positions.setdefault(built.problems[0].position, built.problems[0].difficulty)
 
     for p in built.problems:
         if p.position in ramp_positions:
             level = ramp_positions[p.position]
+            color = DIFF_COLOR.get(level, "#555")
             parts.append(
-                f'<div class="ramp">▲ 이 문항부터 난이도 \'{level}\' 구간이 시작됩니다</div>'
+                f'<div class="ramp" style="border-color:{color};color:{color}">'
+                f"▲ 이 문항부터 난이도 '{level}' 구간입니다</div>"
             )
         badges = ""
         if show_difficulty:
@@ -73,8 +84,8 @@ def render_html(
             parts.append(f'<img class="problem" src="{img_uri}" alt="문제 {p.position}">')
         else:
             parts.append('<div class="missing">(문제 이미지 없음 — 원문 미등록)</div>')
-        if show_source:
-            parts.append(f'<div class="src">{html.escape(p.exam_title)} {p.original_number}번</div>')
+        # 출처는 항상 문항 아래에 표시
+        parts.append(f'<div class="src">출처: {html.escape(p.exam_title)} {p.original_number}번</div>')
         parts.append("</div>")
 
     # 출처·저작권 고지 (항상 표시)

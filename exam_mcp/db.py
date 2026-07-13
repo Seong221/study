@@ -1,10 +1,12 @@
 """SQLite 문제은행 스키마 및 연결 관리."""
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# GICHUL_DATA_DIR: 데이터 디렉터리 오버라이드 (클라우드 영속 볼륨 마운트, 빈 DB 테스트용)
+DATA_DIR = Path(os.environ.get("GICHUL_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
 DB_PATH = DATA_DIR / "exam.db"
 
 SCHEMA = """

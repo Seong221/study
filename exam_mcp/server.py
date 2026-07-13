@@ -264,7 +264,7 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
 
 
 @mcp.tool()
-def bootstrap_bank(n_exams: int = 2) -> str:
+def bootstrap_bank(n_exams: int = 3) -> str:
     """문제은행이 비어 있을 때(새 배포 직후) 최근 수능 수학 기출을 자동 수집해 채운다.
 
     평가원 기출 게시판에서 최신 학년도부터 '수학' 게시글 n_exams개를 찾아
@@ -272,8 +272,11 @@ def bootstrap_bank(n_exams: int = 2) -> str:
     이미 등록된 시험은 자동으로 건너뛰므로 여러 번 호출해도 안전하다.
     학평(교육청) 문제지는 EBSi 수동 경로라 포함되지 않는다 - plan_acquisition 참고.
 
+    generate_exam은 같은 학년의 서로 다른 시험 3개 이상을 요구하므로
+    n_exams는 3 이상이어야 한다 (수능은 모두 고3).
+
     Args:
-        n_exams: 수집할 수능 개수 (최신 학년도부터, 기본 2)
+        n_exams: 수집할 수능 개수 (최신 학년도부터, 기본 3 = generate_exam 최소 요건)
     """
     results: list[str] = []
     found = 0
@@ -293,7 +296,11 @@ def bootstrap_bank(n_exams: int = 2) -> str:
             break
     if not found:
         return "평가원 게시판에서 수학 게시글을 찾지 못했습니다. 게시판 구조가 바뀌었을 수 있습니다."
-    results.append(f"완료: 수능 {found}개 처리. list_exams()로 확인하세요.")
+    results.append(
+        f"완료: 수능 {found}개 처리. list_exams()로 확인 후 generate_exam(grade=3)으로 "
+        "문제지를 만들 수 있습니다 (난이도는 배치 기반 잠정치로 즉시 사용 가능). "
+        "정답표 자동 파싱이 실패한 시험은 view_answer_sheet로 정답표를 읽고 set_answers로 입력하세요."
+    )
     return "\n".join(results)
 
 
@@ -435,12 +442,14 @@ def generate_exam(
     show_difficulty: bool = False,
     show_frequency: bool = False,
     mark_ramp: bool = False,
-    show_source: bool = False,
     title: str | None = None,
     seed: int | None = None,
 ) -> str:
     """평가원 스타일 문제지를 생성한다. 기출에서 난이도 곡선(쉬움→어려움)에 맞춰 선별하고
     HTML 문제지 파일로 저장한 뒤, 구성 요약과 파일 경로를 반환한다.
+
+    문제지는 반드시 서로 다른 시험 3개 이상에서 구성되며, 조건에 맞는 시험이
+    3개 미만이면 생성을 거부한다. 각 문항 아래에는 출처(원 시험·번호)가 항상 표시된다.
 
     Args:
         grade: 학년 (1/2/3)
@@ -450,12 +459,13 @@ def generate_exam(
         show_difficulty: 문항마다 난이도 배지 표시
         show_frequency: 문항마다 유형 출제율 배지 표시
         mark_ramp: 난이도가 올라가는 지점을 문제지에 표시
-        show_source: 출처(원 시험·번호) 표시
         seed: 재현용 랜덤 시드
     """
     conn = _conn()
     built = build_exam(conn, grade=grade, count=count, units=units, source=source, seed=seed)
     if not built.problems:
+        if built.notes:
+            return " ".join(built.notes)
         return "조건에 맞는 문제가 없습니다. list_exams / frequency_stats로 보유 현황을 확인하세요."
 
     # 출처 수집: 선택된 문제들이 속한 원시험 + 다운로드한 공식 사이트
@@ -476,7 +486,7 @@ def generate_exam(
     html_doc = render_html(
         built, title=exam_title, problems_dir=PROBLEMS_DIR,
         show_difficulty=show_difficulty, show_frequency=show_frequency,
-        mark_ramp=mark_ramp, show_source=show_source, sources=sources,
+        mark_ramp=mark_ramp, sources=sources,
     )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / f"exam_g{grade}_{count}q_{seed if seed is not None else 'r'}.html"

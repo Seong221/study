@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 # 평가원 수학 기준 난이도 구성비 (하/중/상)
 DEFAULT_MIX = {"하": 0.35, "중": 0.45, "상": 0.20}
 
+# 문제지 하나는 반드시 이 개수 이상의 서로 다른 시험에서 구성한다
+MIN_SOURCE_EXAMS = 3
+
 
 @dataclass
 class SelectedProblem:
@@ -99,27 +102,54 @@ def build_exam(
         rng.shuffle(rows)
         pools[level] = rows
 
+    # 최소 출처 시험 수 검증: 조건에 맞는 문제를 가진 시험이 3개 미만이면 구성 거부
+    available_exams = {row["exam_id"] for rows in pools.values() for row in rows}
+    if len(available_exams) < MIN_SOURCE_EXAMS:
+        return BuiltExam(problems=[], notes=[
+            f"문제지는 서로 다른 시험 {MIN_SOURCE_EXAMS}개 이상에서 구성해야 하는데, "
+            f"조건에 맞는 시험이 {len(available_exams)}개뿐입니다. "
+            "시험을 더 등록하거나 필터(units/source)를 넓히세요."
+        ])
+
     # 부족한 난이도는 인접 난이도에서 보충
     fallback = {"하": ["중", "상"], "중": ["하", "상"], "상": ["중", "하"]}
     picked: list[tuple[str, sqlite3.Row]] = []
     used_ids: set[int] = set()
+    used_exams: set[int] = set()
+
+    def take(lv: str) -> sqlite3.Row | None:
+        pool = pools[lv]
+        # 출처 시험이 3개 미만인 동안은 아직 안 쓴 시험의 문제를 우선 선택
+        if len(used_exams) < MIN_SOURCE_EXAMS:
+            for idx in range(len(pool) - 1, -1, -1):
+                if pool[idx]["exam_id"] not in used_exams and pool[idx]["id"] not in used_ids:
+                    return pool.pop(idx)
+        while pool:
+            cand = pool.pop()
+            if cand["id"] not in used_ids:
+                return cand
+        return None
+
     for level in seq:
         row = None
         for lv in [level, *fallback[level]]:
-            while pools[lv]:
-                cand = pools[lv].pop()
-                if cand["id"] not in used_ids:
-                    row = cand
-                    if lv != level:
-                        notes.append(f"'{level}' 난이도 문제가 부족해 '{lv}' 문제로 대체된 문항이 있습니다.")
-                    break
-            if row:
+            row = take(lv)
+            if row is not None:
+                if lv != level:
+                    notes.append(f"'{level}' 난이도 문제가 부족해 '{lv}' 문제로 대체된 문항이 있습니다.")
                 break
         if row is None:
             notes.append(f"조건에 맞는 문제가 부족해 {count}문항 중 {len(picked)}문항만 구성했습니다.")
             break
         used_ids.add(row["id"])
+        used_exams.add(row["exam_id"])
         picked.append((level, row))
+
+    if picked and len(used_exams) < MIN_SOURCE_EXAMS:
+        return BuiltExam(problems=[], notes=[
+            f"선별 결과 출처 시험이 {len(used_exams)}개뿐이라 문제지를 구성할 수 없습니다 "
+            f"(최소 {MIN_SOURCE_EXAMS}개). 문항 수를 늘리거나 시험을 더 등록하세요."
+        ])
 
     # 난이도 상승 지점 계산 (실제 배치된 난이도 기준)
     ramp: dict[str, int] = {}

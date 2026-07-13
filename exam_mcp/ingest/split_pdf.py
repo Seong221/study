@@ -20,6 +20,7 @@ from pathlib import Path
 import pymupdf
 
 from .. import db as dbm
+from .answers import provisional_difficulty
 
 NUM_RE = re.compile(r"^(\d{1,2})\s*\.")
 MAX_PROBLEM_NO = 30
@@ -98,10 +99,14 @@ def split_pdf(
             pix = page.get_pixmap(matrix=pymupdf.Matrix(ZOOM, ZOOM), clip=clip)
             img_name = f"{exam_id}/{no:02d}.png"
             pix.save(dbm.DATA_DIR / "problems" / img_name)
+            # 잠정 난이도를 등록 시점에 부여한다 - 정답표 파싱이 실패해도 문제지 생성이
+            # 가능해야 하므로. 실측 정답률·정답표 기반 난이도가 있으면 유지한다.
             conn.execute(
-                """INSERT INTO problems (exam_id, number, image_path) VALUES (?,?,?)
-                   ON CONFLICT(exam_id, number) DO UPDATE SET image_path=excluded.image_path""",
-                (exam_id, no, img_name),
+                """INSERT INTO problems (exam_id, number, image_path, difficulty) VALUES (?,?,?,?)
+                   ON CONFLICT(exam_id, number) DO UPDATE SET
+                       image_path=excluded.image_path,
+                       difficulty=COALESCE(problems.difficulty, excluded.difficulty)""",
+                (exam_id, no, img_name, provisional_difficulty(no)),
             )
             saved += 1
             expected = no + 1
