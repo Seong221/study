@@ -13,7 +13,14 @@ from mcp.server.fastmcp import Context, FastMCP, Image
 
 from . import db as dbm
 from .acquisition import plan_acquisition as _plan_acquisition
-from .discover import incheon_attachments, list_attachments, list_board, list_hakpyeong, list_incheon
+from .discover import (
+    find_suneung_post,
+    incheon_attachments,
+    list_attachments,
+    list_board,
+    list_hakpyeong,
+    list_incheon,
+)
 from .ingest.fetch import extract_pdfs
 from .exam_builder import build_exam
 from .ingest.answers import apply_answers, apply_answers_text, apply_triplets
@@ -30,7 +37,7 @@ mcp = FastMCP(
     instructions=(
         "평가원·교육청 수학 기출 문제은행. 표준 사용 순서: "
         "1) list_exams로 보유 시험 확인 - 비어 있으면 bootstrap_bank() 호출(최근 수능 자동 수집, "
-        "네트워크 오류가 나면 같은 호출을 한 번 더 시도). "
+        "네트워크 오류가 나면 같은 호출을 한 번 더 시도). 특정 학년도 수능은 acquire_suneung(hakneyndo). "
         "2) generate_exam(grade=학년, count=문항수)으로 문제지 생성. "
         "3) 정답이 비어 있으면 사용자에게 정답 목록을 붙여넣어 달라고 요청한 뒤, "
         "받은 텍스트를 가공 없이 set_answers_text에 전달. "
@@ -309,8 +316,77 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
 
 
 @mcp.tool()
+def acquire_suneung(hakneyndo: int) -> str:
+    """특정 학년도의 수능 수학을 평가원 게시판에서 찾아 다운로드·등록한다.
+
+    사용자가 'N년(도) 수능'이라고 하면 N학년도로 해석해 hakneyndo=N으로 호출하라
+    (N학년도 수능 = N-1년 11월 시행). 응답에 해석이 명시되니 사용자에게 그대로 보여줄 것.
+    최신 수능 여러 개를 한꺼번에 채울 때는 bootstrap_bank를 쓴다.
+
+    2022학년도 이전 구 체제(가형/나형)도 지원하며, 이 경우 가형·나형이 별도 시험으로
+    등록되고 정답 자동 입력은 생략된다(배점·난이도는 자동, 문제지 생성에 지장 없음).
+
+    Args:
+        hakneyndo: 학년도 (예: 2021 = 2021학년도 = 2020년 11월 시행)
+    """
+    post = find_suneung_post(hakneyndo)
+    if post is None:
+        return (
+            f"{hakneyndo}학년도 수능 수학 게시글을 평가원 게시판에서 찾지 못했습니다. "
+            f"참고: {hakneyndo}학년도 수능 = {hakneyndo - 1}년 11월 시행. 사용자가 "
+            f"'{hakneyndo}년에 시행된 수능'을 의미했다면 hakneyndo={hakneyndo + 1}로 다시 시도하세요."
+        )
+    attachments = list_attachments(post["board_seq"])
+    names = [a["filename"] for a in attachments]
+
+    # 신 체제(2023학년도~ 등): 문제지 PDF 직접 첨부 → 기존 파이프라인 재사용
+    if any(n.lower().endswith(".pdf") and "문제지" in n and "짝수" not in n for n in names):
+        return acquire_exam(post["board_seq"], hakneyndo)
+
+    # 구 체제: 문제지가 zip(홀/짝, 가형/나형)으로 묶여 있음
+    results = [f"=== {hakneyndo}학년도(={hakneyndo - 1}년 11월 시행) 수능 수학 ==="]
+    conn = _conn()
+    answers_pdf = None
+    registered: list[tuple[int, str]] = []
+    for a in attachments:
+        fname = a["filename"]
+        try:
+            if fname.lower().endswith(".pdf") and "정답" in fname:
+                answers_pdf = fetch(a["url"], f"{hakneyndo}_{fname}")
+                results.append(f"[저장] 정답표 {fname}")
+            elif fname.lower().endswith(".zip"):
+                dest = fetch(a["url"], f"{hakneyndo}_{fname}")
+                pdfs = extract_pdfs(dest)
+                # 홀수형만 등록 (짝수형은 문항 동일·배치만 다름)
+                odd = [p for p in pdfs if "짝" not in p.name]
+                odd = [p for p in odd if "홀" in p.name] or odd
+                for pdf in odd:
+                    track = "가형" if "가형" in pdf.name else ("나형" if "나형" in pdf.name else "")
+                    exam_id = split_pdf(pdf, source="KICE", year=hakneyndo - 1, month=11,
+                                        grade=3, track=track, source_url=a["url"])
+                    n_prob = conn.execute(
+                        "SELECT COUNT(*) FROM problems WHERE exam_id=?", (exam_id,)).fetchone()[0]
+                    registered.append((exam_id, track))
+                    results.append(f"[분리] {pdf.name} → 시험 id={exam_id} ({track or '단일형'}, {n_prob}문항)")
+        except SecurityError as e:
+            results.append(f"[차단] {fname}: {e}")
+
+    if not registered:
+        return "\n".join(results + ["문제지 zip을 찾지 못했습니다. 첨부: " + ", ".join(names)])
+    if answers_pdf and len(registered) == 1:
+        results.append(apply_answers(registered[0][0], answers_pdf))
+    elif len(registered) > 1:
+        results.append("가형/나형 구 체제라 정답 자동 입력은 생략했습니다 (배점·잠정 난이도는 자동 부여됨).")
+    results.append("다음: 문제지가 필요하면 generate_exam(grade=3)을 호출하세요.")
+    return "\n".join(results)
+
+
+@mcp.tool()
 def bootstrap_bank(n_exams: int = 3) -> str:
     """문제은행이 비어 있을 때(새 배포 직후) 최근 수능 수학 기출을 자동 수집해 채운다.
+
+    항상 최신 학년도부터 n_exams개를 받는다 - 특정 학년도 수능을 원하면
+    이 도구가 아니라 acquire_suneung(hakneyndo)를 호출할 것.
 
     평가원 기출 게시판에서 최신 학년도부터 '수학' 게시글 n_exams개를 찾아
     acquire_exam 파이프라인(다운로드→문항 분리→정답 등록)을 차례로 실행한다.
@@ -629,7 +705,7 @@ async def serve_exam(request):
 # 나머지(게시판 탐색 세부, 이미지 보기, JSON 정답 입력, 태깅 등)는 개발자용.
 CORE_TOOLS = {
     "list_exams", "search_problems", "frequency_stats", "plan_acquisition",
-    "discover_exams", "acquire_exam", "bootstrap_bank",
+    "discover_exams", "acquire_exam", "acquire_suneung", "bootstrap_bank",
     "set_answers_text", "generate_exam",
 }
 

@@ -56,13 +56,11 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
             "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 11월 시행 = {hakneyndo}학년도 수능. "
                        f"사용자가 '{year}학년도 수능'을 의미했다면 year={year - 1}로 다시 호출하세요.",
             "자동_수집": "전부 자동 (문제지+정답표)",
-            "빠른_길": "최신 수능 몇 개를 한꺼번에 채우려면 bootstrap_bank(n_exams=개수) 호출 한 번이면 됩니다.",
+            "빠른_길": f"이 학년도 하나만 원하면 acquire_suneung(hakneyndo={hakneyndo}) 호출 한 번이면 됩니다. "
+                     "최신 수능 여러 개를 한꺼번에 채우려면 bootstrap_bank(n_exams=개수).",
             "절차": [
-                f"1. [자동] discover_exams(page=1) → 학년도 {hakneyndo}·영역 '수학' 게시글의 "
-                "board_seq 확인 (목록에 없으면 page를 2, 3…으로 넘겨 과거 학년도 탐색)",
-                f"2. [자동] acquire_exam(board_seq=<1에서 찾은 값>, hakneyndo={hakneyndo}) "
-                "→ 다운로드·문항 분리·정답 등록까지 자동",
-                "3. [자동] list_exams()로 등록 확인",
+                f"1. [자동] acquire_suneung(hakneyndo={hakneyndo}) → 게시글 탐색·다운로드·문항 분리·정답 등록까지 자동",
+                "2. [자동] list_exams()로 등록 확인",
             ],
         }
 

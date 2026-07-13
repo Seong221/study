@@ -51,6 +51,23 @@ def list_board(page: int = 1) -> list[dict]:
     return posts
 
 
+def find_suneung_post(hakneyndo: int, max_pages: int = 20) -> dict | None:
+    """기출 게시판을 페이지 순회하며 특정 학년도의 수학 게시글을 찾는다.
+
+    게시판은 최신순이므로, 현재 페이지의 최소 학년도가 목표보다 작아지면 중단한다.
+    """
+    for page in range(1, max_pages + 1):
+        posts = list_board(page)
+        if not posts:
+            return None
+        for p in posts:
+            if p["hakneyndo"] == hakneyndo and "수학" in p["subject"]:
+                return p
+        if min(p["hakneyndo"] for p in posts) < hakneyndo:
+            return None  # 이미 지나침 - 게시판에 없음
+    return None
+
+
 SEN_BOARD = "https://www.sen.go.kr/user/bbs/BD_selectBbsList.do?q_bbsSn=1036"
 
 
