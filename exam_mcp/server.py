@@ -25,7 +25,19 @@ DATA_DIR = dbm.DATA_DIR
 PROBLEMS_DIR = DATA_DIR / "problems"
 OUTPUT_DIR = DATA_DIR / "output"
 
-mcp = FastMCP("gichul-exam-bank")
+mcp = FastMCP(
+    "gichul-exam-bank",
+    instructions=(
+        "평가원·교육청 수학 기출 문제은행. 표준 사용 순서: "
+        "1) list_exams로 보유 시험 확인 - 비어 있으면 bootstrap_bank() 호출(최근 수능 자동 수집, "
+        "네트워크 오류가 나면 같은 호출을 한 번 더 시도). "
+        "2) generate_exam(grade=학년, count=문항수)으로 문제지 생성. "
+        "3) 정답이 비어 있으면 사용자에게 정답 목록을 붙여넣어 달라고 요청한 뒤, "
+        "받은 텍스트를 가공 없이 set_answers_text에 전달. "
+        "연도 표기 주의: 수능은 학년도가 시행연도보다 1 크다 (2026학년도 수능 = 2025년 11월 시행). "
+        "각 도구 응답 끝의 안내 문장을 그대로 따르면 된다."
+    ),
+)
 
 
 def _conn():
@@ -51,6 +63,9 @@ def list_exams() -> str:
     for r in rows:
         d = dict(r)
         d["출처"] = dbm.site_name(d.pop("source_url"))
+        # 평가원 시험은 학년도 병기 (2026학년도 수능 = 2025년 11월 시행) - 연도 혼동 방지
+        if d["source"] == "KICE":
+            d["학년도"] = f"{d['year'] + 1}학년도 (시행 {d['year']}년 {d['month']}월)"
         out.append(d)
     return json.dumps(out, ensure_ascii=False, indent=1)
 
@@ -240,7 +255,7 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
         name = f"{hakneyndo}_{a['filename']}"
         dest = dbm.DATA_DIR / "raw" / name
         if dest.exists():
-            results.append(f"[건너뜀] {name} - 이미 존재")
+            results.append(f"[건너뜀] {name} - 이미 다운로드되어 있음 (오류 아님)")
         else:
             try:
                 dest = fetch(a["url"], name)
@@ -256,9 +271,13 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
     if auto_split and exam_pdf:
         exam_id = split_pdf(exam_pdf, source="KICE", year=hakneyndo - 1, month=11, grade=3,
                             source_url=exam_url)
-        results.append(f"[분리] {exam_pdf.name} → 시험 id={exam_id}로 문항 이미지 등록 완료")
+        results.append(
+            f"[분리] {exam_pdf.name} → 시험 id={exam_id}로 문항 이미지 등록 완료 "
+            f"({hakneyndo}학년도 수능 = {hakneyndo - 1}년 11월 시행, 고3)"
+        )
         if answers_pdf:
             results.append(apply_answers(exam_id, answers_pdf))
+        results.append("다음: 문제지가 필요하면 generate_exam(grade=3)을 호출하세요.")
 
     return "\n".join(results)
 
@@ -289,7 +308,10 @@ def bootstrap_bank(n_exams: int = 3) -> str:
                 break
             if "수학" not in p["subject"]:
                 continue
-            results.append(f"=== {p['hakneyndo']}학년도 수능 수학 (board_seq={p['board_seq']}) ===")
+            results.append(
+                f"=== {p['hakneyndo']}학년도(={p['hakneyndo'] - 1}년 11월 시행) 수능 수학 "
+                f"(board_seq={p['board_seq']}) ==="
+            )
             results.append(acquire_exam(p["board_seq"], p["hakneyndo"]))
             found += 1
         if found >= n_exams:
@@ -554,6 +576,21 @@ async def serve_exam(request):
     if not path.exists():
         return PlainTextResponse("문제지를 찾을 수 없습니다.", status_code=404)
     return FileResponse(path, media_type="text/html")
+
+
+# 추론이 약한 클라이언트(카카오 PlayMCP 등)용 코어 도구 모음.
+# GICHUL_CORE_TOOLS=1이면 이것만 노출한다 - 선택지가 적을수록 약한 AI의 오호출이 줄어든다.
+# 나머지(게시판 탐색 세부, 이미지 보기, JSON 정답 입력, 태깅 등)는 개발자용.
+CORE_TOOLS = {
+    "list_exams", "search_problems", "frequency_stats", "plan_acquisition",
+    "discover_exams", "acquire_exam", "bootstrap_bank",
+    "set_answers_text", "generate_exam",
+}
+
+if os.environ.get("GICHUL_CORE_TOOLS", "").lower() in ("1", "true", "yes"):
+    for _name in list(mcp._tool_manager._tools):
+        if _name not in CORE_TOOLS:
+            del mcp._tool_manager._tools[_name]
 
 
 if __name__ == "__main__":

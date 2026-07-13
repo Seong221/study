@@ -11,5 +11,9 @@ COPY . .
 
 # data/는 저장소에 포함되지 않는다(저작권) - 기동 시 자동 생성되고,
 # bootstrap_bank / acquire_exam 도구로 클라우드에서 직접 수집해 채운다.
+
+# 추론이 약한 클라이언트(카카오 AI)용 코어 도구만 노출. 콘솔에서 0으로 끄면 전체 노출.
+ENV GICHUL_CORE_TOOLS=1
+
 EXPOSE 8000
 CMD ["python", "run_server.py", "--http"]

@@ -53,7 +53,10 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
         return {
             "요청": req,
             "분류": f"대학수학능력시험 ({hakneyndo}학년도 수능, 평가원 주관)",
+            "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 11월 시행 = {hakneyndo}학년도 수능. "
+                       f"사용자가 '{year}학년도 수능'을 의미했다면 year={year - 1}로 다시 호출하세요.",
             "자동_수집": "전부 자동 (문제지+정답표)",
+            "빠른_길": "최신 수능 몇 개를 한꺼번에 채우려면 bootstrap_bank(n_exams=개수) 호출 한 번이면 됩니다.",
             "절차": [
                 f"1. [자동] discover_exams(page=1) → 학년도 {hakneyndo}·영역 '수학' 게시글의 "
                 "board_seq 확인 (목록에 없으면 page를 2, 3…으로 넘겨 과거 학년도 탐색)",
@@ -68,6 +71,7 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
         return {
             "요청": req,
             "분류": f"평가원 {month}월 모의평가 ({hakneyndo}학년도, 평가원 주관)",
+            "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 {month}월 시행 = {hakneyndo}학년도 모평.",
             "자동_수집": "부분 자동 - 평가원 게시판에 게시글이 있으면 전부 자동, 없으면 문제지는 EBSi 수동",
             "절차": [
                 f"1. [자동] discover_exams()로 {hakneyndo}학년도 {month}월 모의평가 게시글이 있는지 확인",
