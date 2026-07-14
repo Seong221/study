@@ -347,15 +347,18 @@ def acquire_suneung(hakneyndo: int) -> str:
     results = [f"=== {hakneyndo}학년도(={hakneyndo - 1}년 11월 시행) 수능 수학 ==="]
     conn = _conn()
     answers_pdf = None
+    zip_url = answers_url = None
     registered: list[tuple[int, str]] = []
     for a in attachments:
         fname = a["filename"]
         try:
             if fname.lower().endswith(".pdf") and "정답" in fname:
                 answers_pdf = fetch(a["url"], f"{hakneyndo}_{fname}")
+                answers_url = a["url"]
                 results.append(f"[저장] 정답표 {fname}")
             elif fname.lower().endswith(".zip"):
                 dest = fetch(a["url"], f"{hakneyndo}_{fname}")
+                zip_url = a["url"]
                 pdfs = extract_pdfs(dest)
                 # 홀수형만 등록 (짝수형은 문항 동일·배치만 다름)
                 odd = [p for p in pdfs if "짝" not in p.name]
@@ -377,6 +380,13 @@ def acquire_suneung(hakneyndo: int) -> str:
         results.append(apply_answers(registered[0][0], answers_pdf))
     elif len(registered) > 1:
         results.append("가형/나형 구 체제라 정답 자동 입력은 생략했습니다 (배점·잠정 난이도는 자동 부여됨).")
+    links = ([f"문제지 묶음(zip) {zip_url}"] if zip_url else []) + \
+            ([f"정답표 {answers_url}"] if answers_url else [])
+    if links:
+        results.append(
+            "[공식 다운로드 링크] " + " · ".join(links)
+            + " ← 사용자가 원본을 원하면 이 평가원 공식 링크를 그대로 전달하세요."
+        )
     results.append("다음: 문제지가 필요하면 generate_exam(grade=3)을 호출하세요.")
     return "\n".join(results)
 
