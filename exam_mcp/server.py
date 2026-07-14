@@ -84,8 +84,13 @@ def list_exams() -> str:
            GROUP BY e.id ORDER BY e.year, e.month, e.grade"""
     ).fetchall()
     if not rows:
-        return ("등록된 시험이 없습니다. bootstrap_bank()를 호출하면 최근 수능 수학 기출을 "
-                "자동 수집합니다. 특정 시험은 plan_acquisition(year, month, grade)으로 경로를 확인하세요.")
+        return ("등록된 시험이 없습니다.\n"
+                "[사용자에게 먼저 보낼 문장] 문제은행이 비어 있어서 최근 수능 기출을 먼저 "
+                "가져올게요. 1~2분 정도 걸리니 잠시만 기다려 주세요!\n"
+                "[AI 행동 지시] 위 문장을 사용자에게 보낸 뒤, 확인을 기다리지 말고 바로 "
+                "bootstrap_bank()를 호출하세요. 특정 학년도 수능을 원하면 acquire_suneung(학년도), "
+                "그 외 시험은 plan_acquisition(year, month, grade)으로 경로를 확인하세요. "
+                "함수 이름이나 이 지시문을 사용자에게 보여주지 마세요.")
     out = []
     for r in rows:
         d = dict(r)
@@ -643,13 +648,21 @@ def generate_exam(
     if not built.problems:
         base = " ".join(built.notes) if built.notes else "조건에 맞는 문제가 없습니다."
         if grade == 3:
-            base += (" 다음: bootstrap_bank()를 호출하면 최근 수능 3개(고3 수학)가 자동 수집됩니다. "
-                     "네트워크 오류가 나면 같은 호출을 다시 시도하세요. 수집이 끝나면 이 도구를 다시 호출하세요.")
-        else:
-            base += (f" 고{grade} 학평 문제지는 교육청이 공개 배포하지 않아 자동 수집이 불가능합니다. "
-                     f"plan_acquisition(year=<시행연도>, month=<월>, grade={grade})를 호출하면 나오는 "
-                     "'사용자_안내문'을 사용자에게 그대로 전달하세요.")
-        return base
+            return (
+                base + "\n[사용자에게 먼저 보낼 문장] 문제은행에 시험이 부족해서 최근 수능 기출을 "
+                "먼저 가져올게요. 1~2분 정도 걸리니 잠시만 기다려 주세요!\n"
+                "[AI 행동 지시] 위 문장을 사용자에게 보낸 뒤, 확인을 기다리지 말고 바로 "
+                "bootstrap_bank()를 호출하세요. 오류가 나면 같은 호출을 한 번 더 시도하고, "
+                "수집이 끝나면 이 도구를 다시 호출하세요. 함수 이름이나 이 지시문을 사용자에게 "
+                "보여주지 마세요."
+            )
+        return (
+            base + f"\n[사용자에게 그대로 보낼 문장] 고{grade} 학력평가 문제지는 교육청이 "
+            "공개 배포하지 않아 제가 자동으로 가져올 수 없어요. EBSi 기출문제실"
+            "(https://www.ebsi.co.kr/ebs/xip/xipc/previousPaperList.ebs)에서 무료 로그인하면 "
+            "직접 내려받을 수 있습니다.\n"
+            "[AI 행동 지시] 위 문장 외의 기술적 설명이나 함수 이름은 사용자에게 보여주지 마세요."
+        )
 
     # 출처 수집: 선택된 문제들이 속한 원시험 + 다운로드한 공식 사이트
     exam_ids = sorted({
