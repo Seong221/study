@@ -38,7 +38,8 @@ mcp = FastMCP(
         "평가원·교육청 수학 기출 문제은행. 표준 사용 순서: "
         "1) list_exams로 보유 시험 확인 - 비어 있으면 bootstrap_bank() 호출(최근 수능 자동 수집, "
         "네트워크 오류가 나면 같은 호출을 한 번 더 시도). 특정 학년도 수능은 acquire_suneung(hakneyndo). "
-        "2) generate_exam(grade=학년, count=문항수)으로 문제지 생성. "
+        "2) generate_exam(grade=학년, count=문항수)으로 문제지 생성 - 고3이면 사용자에게 "
+        "선택과목(확률과통계/미적분/기하)을 물어 track으로 지정하는 것을 권장. "
         "3) 정답이 비어 있으면 사용자에게 정답 목록을 붙여넣어 달라고 요청한 뒤, "
         "받은 텍스트를 가공 없이 set_answers_text에 전달. "
         "연도 표기 주의: 수능은 학년도가 시행연도보다 1 크다 (2026학년도 수능 = 2025년 11월 시행). "
@@ -603,6 +604,7 @@ def generate_exam(
     count: int = 20,
     units: list[str] | None = None,
     source: str | None = None,
+    track: str | None = None,
     show_difficulty: bool = True,
     show_frequency: bool = False,
     mark_ramp: bool = True,
@@ -624,13 +626,20 @@ def generate_exam(
         count: 문항 수
         units: 대단원 필터 (예: ['이차함수', '도형의 방정식'])
         source: 'KICE'(평가원만) / 'OFFICE'(학평만) / None(전체)
+        track: 수능 선택과목 - '확률과통계'/'미적분'/'기하' 중 하나. 수험생은 선택과목
+               하나만 응시하므로, 고3 사용자에게 어느 과목 응시인지 물어 지정하는 것을
+               권장한다. 지정하면 공통(1~22번)+해당 과목 문항으로만 구성되고,
+               지정하지 않으면 모든 선택과목이 섞인다.
         show_difficulty: 문항마다 난이도 배지 표시 (기본 켜짐)
         show_frequency: 문항마다 유형 출제율 배지 표시
         mark_ramp: 난이도 구간(하/중/상)의 시작 지점을 문제지에 표시 (기본 켜짐)
         seed: 재현용 랜덤 시드
     """
+    if track and track not in ("확률과통계", "미적분", "기하"):
+        return "track은 '확률과통계'/'미적분'/'기하' 중 하나여야 합니다."
     conn = _conn()
-    built = build_exam(conn, grade=grade, count=count, units=units, source=source, seed=seed)
+    built = build_exam(conn, grade=grade, count=count, units=units, source=source,
+                       track=track, seed=seed)
     if not built.problems:
         base = " ".join(built.notes) if built.notes else "조건에 맞는 문제가 없습니다."
         if grade == 3:
@@ -656,7 +665,7 @@ def generate_exam(
             "url": e["source_url"],
         })
 
-    exam_title = title or f"고{grade} 수학 모의 문제지"
+    exam_title = title or (f"고{grade} 수학 모의 문제지" + (f" ({track})" if track else ""))
     html_doc = render_html(
         built, title=exam_title, problems_dir=PROBLEMS_DIR,
         show_difficulty=show_difficulty, show_frequency=show_frequency,
@@ -679,6 +688,7 @@ def generate_exam(
     summary = {
         "문제지 파일": str(out_path),
         "문제지 URL": exam_url,
+        "선택과목": track or "혼합 (track 미지정 - 확통/미적/기하 문항이 섞임)",
         "출처": [
             f"{s['title']} — {s['site']}" + (f" ({s['url']})" if s["url"] else "")
             for s in sources

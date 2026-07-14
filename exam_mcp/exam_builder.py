@@ -75,6 +75,7 @@ def build_exam(
     count: int = 20,
     units: list[str] | None = None,
     source: str | None = None,      # 'KICE' | 'OFFICE' | None(전체)
+    track: str | None = None,       # 선택과목 ('확률과통계'/'미적분'/'기하') - 수능 은행용
     mix: dict[str, float] | None = None,
     seed: int | None = None,
 ) -> BuiltExam:
@@ -97,6 +98,14 @@ def build_exam(
     if source:
         base_sql += " AND e.source=?"
         params_tail.append(source)
+    if track == "확률과통계":
+        # 확통 문항은 무track 시험(공통 1~22 + 확통 23~30)에 들어 있다 - 그 전체가 확통 응시자용
+        base_sql += " AND e.track = ''"
+    elif track:
+        # 수험생은 선택과목 하나만 응시한다: 공통(무track 시험의 1~22번, 23~30번은
+        # 첫 선택과목인 확통이므로 번호로 잘라냄) + 지정 선택과목 track 시험만.
+        base_sql += " AND ((e.track = '' AND p.number <= 22) OR e.track = ?)"
+        params_tail.append(track)
 
     pools: dict[str, list[sqlite3.Row]] = {}
     for level in ("하", "중", "상"):
