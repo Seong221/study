@@ -84,7 +84,9 @@ def build_exam(
 
     # 난이도별 후보 문제 조회
     base_sql = """
-        SELECT p.*, e.title AS exam_title FROM problems p
+        SELECT p.*, e.title AS exam_title,
+               e.source AS exam_source, e.year AS exam_year, e.month AS exam_month
+        FROM problems p
         JOIN exams e ON e.id = p.exam_id
         WHERE e.grade=? AND e.subject=? AND p.difficulty=?
     """
@@ -102,12 +104,16 @@ def build_exam(
         rng.shuffle(rows)
         pools[level] = rows
 
-    # 최소 출처 시험 수 검증: 조건에 맞는 문제를 가진 시험이 3개 미만이면 구성 거부
-    available_exams = {row["exam_id"] for rows in pools.values() for row in rows}
-    if len(available_exams) < MIN_SOURCE_EXAMS:
+    # 최소 출처 검증은 '시행'(출제기관·연도·월) 기준 - 같은 수능의 선택과목(track)들이
+    # 별도 시험으로 등록되어도 하나의 시행으로 센다.
+    def sitting(row: sqlite3.Row) -> tuple:
+        return (row["exam_source"], row["exam_year"], row["exam_month"])
+
+    available = {sitting(row) for rows in pools.values() for row in rows}
+    if len(available) < MIN_SOURCE_EXAMS:
         return BuiltExam(problems=[], notes=[
-            f"문제지는 서로 다른 시험 {MIN_SOURCE_EXAMS}개 이상에서 구성해야 하는데, "
-            f"조건에 맞는 시험이 {len(available_exams)}개뿐입니다. "
+            f"문제지는 서로 다른 시행(시험 회차) {MIN_SOURCE_EXAMS}개 이상에서 구성해야 하는데, "
+            f"조건에 맞는 회차가 {len(available)}개뿐입니다. "
             "시험을 더 등록하거나 필터(units/source)를 넓히세요."
         ])
 
@@ -115,14 +121,14 @@ def build_exam(
     fallback = {"하": ["중", "상"], "중": ["하", "상"], "상": ["중", "하"]}
     picked: list[tuple[str, sqlite3.Row]] = []
     used_ids: set[int] = set()
-    used_exams: set[int] = set()
+    used_sittings: set[tuple] = set()
 
     def take(lv: str) -> sqlite3.Row | None:
         pool = pools[lv]
-        # 출처 시험이 3개 미만인 동안은 아직 안 쓴 시험의 문제를 우선 선택
-        if len(used_exams) < MIN_SOURCE_EXAMS:
+        # 시행이 3개 미만인 동안은 아직 안 쓴 회차의 문제를 우선 선택
+        if len(used_sittings) < MIN_SOURCE_EXAMS:
             for idx in range(len(pool) - 1, -1, -1):
-                if pool[idx]["exam_id"] not in used_exams and pool[idx]["id"] not in used_ids:
+                if sitting(pool[idx]) not in used_sittings and pool[idx]["id"] not in used_ids:
                     return pool.pop(idx)
         while pool:
             cand = pool.pop()
@@ -142,12 +148,12 @@ def build_exam(
             notes.append(f"조건에 맞는 문제가 부족해 {count}문항 중 {len(picked)}문항만 구성했습니다.")
             break
         used_ids.add(row["id"])
-        used_exams.add(row["exam_id"])
+        used_sittings.add(sitting(row))
         picked.append((level, row))
 
-    if picked and len(used_exams) < MIN_SOURCE_EXAMS:
+    if picked and len(used_sittings) < MIN_SOURCE_EXAMS:
         return BuiltExam(problems=[], notes=[
-            f"선별 결과 출처 시험이 {len(used_exams)}개뿐이라 문제지를 구성할 수 없습니다 "
+            f"선별 결과 출처 회차가 {len(used_sittings)}개뿐이라 문제지를 구성할 수 없습니다 "
             f"(최소 {MIN_SOURCE_EXAMS}개). 문항 수를 늘리거나 시험을 더 등록하세요."
         ])
 

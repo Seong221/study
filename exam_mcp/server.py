@@ -303,6 +303,14 @@ def acquire_exam(board_seq: int, hakneyndo: int, auto_split: bool = True) -> str
             f"[분리] {exam_pdf.name} → 시험 id={exam_id}로 문항 이미지 등록 완료 "
             f"({hakneyndo}학년도 수능 = {hakneyndo - 1}년 11월 시행, 고3)"
         )
+        for r in _conn().execute(
+            """SELECT e.id, e.track, COUNT(p.id) AS n FROM exams e JOIN problems p ON p.exam_id=e.id
+               WHERE e.source='KICE' AND e.year=? AND e.month=11 AND e.grade=3 AND e.track!=''
+               GROUP BY e.id""", (hakneyndo - 1,)):
+            results.append(
+                f"[선택과목] {r['track']} → 별도 시험 id={r['id']} ({r['n']}문항, "
+                "배점·난이도 자동, 정답은 set_answers_text로 입력 가능)"
+            )
         if answers_pdf:
             results.append(apply_answers(exam_id, answers_pdf))
         links = [f"문제지 {exam_url}"] + ([f"정답표 {answers_url}"] if answers_url else [])

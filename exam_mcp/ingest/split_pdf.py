@@ -25,6 +25,7 @@ from .answers import provisional_difficulty
 NUM_RE = re.compile(r"^(\d{1,2})\s*\.")
 POINTS_RE = re.compile(r"\[\s*([234])\s*점\s*\]")  # 문항 본문의 "[3점]" 배점 표기
 MAX_PROBLEM_NO = 30
+SELECTIVE_START = 23  # 수능 선택과목(확통/미적/기하)은 23~30번이 과목마다 반복된다
 HEADER_MARGIN = 130  # 페이지 상단 머리글(교시/홀짝형 표기) 제외
 FOOTER_MARGIN = 110  # 하단 쪽번호·저작권 문구 제외
 CROP_PAD_TOP = 6
@@ -72,21 +73,17 @@ def split_pdf(
         conn, source=source, year=year, month=month, grade=grade,
         subject=subject, track=track, pdf_path=str(pdf_path), source_url=source_url,
     )
-    out_dir = dbm.DATA_DIR / "problems" / str(exam_id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
+    # 1단계: 문항 앵커를 읽기 순서대로 수집하며 라운드로 나눈다.
+    # 수능은 공통(1~22)+첫 선택과목(23~30) 뒤에 다른 선택과목이 23~30번으로 반복되므로,
+    # 30번을 채운 뒤 다시 23번이 나오면 새 선택과목 라운드로 취급한다.
+    rounds: list[list[tuple[int, int, pymupdf.Rect]]] = [[]]  # [(문항번호, 페이지, 클립영역)]
     expected = 1  # 문항 번호는 읽기 순서상 증가해야 함 (오탐 제거)
-    saved = 0
-    n_pts = 0
-    pts_sum = 0
     for page_idx in range(start_page - 1, len(doc)):
         page = doc[page_idx]
         mid_x = page.rect.width / 2
         anchors = find_anchors(page)
         # 읽기 순서: 왼쪽 단 위→아래, 오른쪽 단 위→아래
         anchors.sort(key=lambda a: (a[1], a[2]))
-        anchors = [a for a in anchors if a[0] >= expected]
-
         for i, (no, col, y0) in enumerate(anchors):
             if no != expected:
                 continue
@@ -99,8 +96,21 @@ def split_pdf(
             x0 = 0 if col == 0 else mid_x
             x1 = mid_x if col == 0 else page.rect.width
             clip = pymupdf.Rect(x0 + 8, max(y0 - CROP_PAD_TOP, HEADER_MARGIN), x1 - 8, y_end)
+            rounds[-1].append((no, page_idx, clip))
+            expected += 1
+            if expected > MAX_PROBLEM_NO:
+                rounds.append([])
+                expected = SELECTIVE_START
+    if not rounds[-1]:
+        rounds.pop()
+
+    def register(eid: int, items: list[tuple[int, int, pymupdf.Rect]], label: str) -> None:
+        (dbm.DATA_DIR / "problems" / str(eid)).mkdir(parents=True, exist_ok=True)
+        n_pts = pts_sum = 0
+        for no, page_idx, clip in items:
+            page = doc[page_idx]
             pix = page.get_pixmap(matrix=pymupdf.Matrix(ZOOM, ZOOM), clip=clip)
-            img_name = f"{exam_id}/{no:02d}.png"
+            img_name = f"{eid}/{no:02d}.png"
             pix.save(dbm.DATA_DIR / "problems" / img_name)
             # 배점은 문항 본문의 "[N점]" 표기에서 추출한다 - 정답표가 파싱 불가여도 채워진다
             m = POINTS_RE.search(page.get_text("text", clip=clip))
@@ -117,17 +127,43 @@ def split_pdf(
                        image_path=excluded.image_path,
                        difficulty=COALESCE(problems.difficulty, excluded.difficulty),
                        points=COALESCE(problems.points, excluded.points)""",
-                (exam_id, no, img_name, provisional_difficulty(no), pts),
+                (eid, no, img_name, provisional_difficulty(no), pts),
             )
-            saved += 1
-            expected = no + 1
-    conn.commit()
-    print(f"[완료] 시험 id={exam_id}: 문항 {saved}개 분리 → {out_dir}")
-    print(f"[배점] 문제지 본문에서 {n_pts}/{saved}문항 배점 추출 (합계 {pts_sum}점)")
-    if saved and (n_pts < saved or pts_sum != 100):
-        print("[주의] 배점 추출이 불완전합니다. 정답표 파싱이나 set_answers_text로 보완하세요.")
-    if saved < 20:
-        print("[주의] 분리된 문항이 적습니다. PDF 레이아웃이 다르거나 스캔본일 수 있으니 이미지를 확인하세요.")
+        conn.commit()
+        print(f"[완료] 시험 id={eid}{label}: 문항 {len(items)}개 분리")
+        print(f"[배점] 문제지 본문에서 {n_pts}/{len(items)}문항 배점 추출 (합계 {pts_sum}점)")
+        if n_pts < len(items) or (len(items) >= 20 and pts_sum != 100):
+            print("[주의] 배점 추출이 불완전합니다. 정답표 파싱이나 set_answers_text로 보완하세요.")
+        if len(items) < 8:
+            print("[주의] 분리된 문항이 적습니다. PDF 레이아웃이 다르거나 스캔본일 수 있으니 이미지를 확인하세요.")
+
+    def detect_track(page_idx: int, fallback: str) -> str:
+        head = doc[page_idx].get_text().replace(" ", "")
+        for kw in ("미적분", "기하", "확률과통계"):
+            if kw in head:
+                return kw
+        return fallback
+
+    register(exam_id, rounds[0], "")
+
+    # 2단계: 추가 선택과목(미적분·기하 등)은 track을 붙여 별도 시험으로 등록한다.
+    # 문제지 PDF에 홀수형+짝수형이 함께 든 경우 짝수형 구간에서 같은 과목이 반복되므로,
+    # 본시험의 첫 선택과목을 포함해 이미 본 track이 다시 나오면 거기서 중단한다(중복 방지).
+    first_sel = next((it for it in rounds[0] if it[0] == SELECTIVE_START), None)
+    seen_tracks = {detect_track(first_sel[1], "확률과통계")} if first_sel else set()
+    order_fallback = ["미적분", "기하"]
+    for r_idx, rnd in enumerate(rounds[1:]):
+        fb = order_fallback[r_idx] if r_idx < len(order_fallback) else f"선택{r_idx + 2}"
+        tr = detect_track(rnd[0][1], fb)
+        if tr in seen_tracks:
+            break  # 짝수형(중복 문항) 구간 진입 - 이후 라운드는 전부 중복
+        seen_tracks.add(tr)
+        eid2 = dbm.get_or_create_exam(
+            conn, source=source, year=year, month=month, grade=grade,
+            subject=subject, track=tr, pdf_path=str(pdf_path), source_url=source_url,
+        )
+        register(eid2, rnd, f" ({tr})")
+
     return exam_id
 
 
