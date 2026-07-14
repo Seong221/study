@@ -69,7 +69,9 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
         return {
             "요청": req,
             "분류": f"평가원 {month}월 모의평가 ({hakneyndo}학년도, 평가원 주관)",
-            "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 {month}월 시행 = {hakneyndo}학년도 모평.",
+            "연도_해석": f"입력한 year는 시행연도로 해석됨: {year}년 {month}월 시행 = {hakneyndo}학년도 모평. "
+                       f"사용자가 '{year}학년도 모평'을 의미했다면 year={year - 1}로 다시 호출하세요. "
+                       "모평은 6월·9월 두 번 시행되니 사용자가 월을 말하지 않았다면 어느 쪽인지 확인하세요.",
             "자동_수집": "불가 - 평가원 수능 홈페이지에 모의평가 문제지 게시판이 없음(2026-07 확인). "
                        "문제지는 EBSi 로그인 다운로드만 가능",
             "사용자_안내문": (
