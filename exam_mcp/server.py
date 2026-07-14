@@ -461,9 +461,9 @@ def discover_hakpyeong() -> str:
 def discover_incheon(page: int = 1) -> str:
     """인천광역시교육청 학력평가자료 게시판을 탐색한다.
 
-    과거 게시글에는 학평 '문답지(문제지+답지)' zip이 있다 - 학평 문제지 원본을 구할 수 있는 경로.
-    최근 글은 저작권 정책 변경으로 통계자료만 있을 수 있음. 게시글의 첨부는 incheon_post_files로 조회.
-    원하는 시험이 목록에 없으면 웹 검색으로 ice.go.kr의 게시글(nttSn)을 찾아도 된다.
+    주의(2026-07 재확인): 과거에 있던 학평 '문답지' 게시글이 저작권 정책으로 정리되어
+    현재는 채점결과·통계 게시글 몇 건만 남아 있다. 학평 문제지 원본은 EBSi 수동 경로만
+    가능 - plan_acquisition의 '사용자_안내문'을 사용할 것. 첨부는 incheon_post_files로 조회.
     """
     posts = list_incheon(page)
     if not posts:

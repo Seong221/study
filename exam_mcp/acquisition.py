@@ -104,15 +104,13 @@ def plan_acquisition(year: int, month: int, grade: int) -> dict:
                 "② 정답표·해설 (자동):",
                 f"   [자동] discover_hakpyeong() → '{year}년 {month}월 고{grade} … 정답표' zip의 url을 "
                 "acquire_hakpyeong_file(url, name)로 다운로드 (최근 시험만 첫 페이지에 노출됨)",
-                "③ 과거 시험이라면 문제지도 자동 수집 가능성 있음 (선택):",
-                "   [자동] discover_incheon() 또는 웹 검색으로 ice.go.kr 게시글 번호(nttSn)를 찾아 "
-                "incheon_post_files(ntt_sn) 조회 → 문답지 zip이 있으면 acquire_hakpyeong_file로 다운로드",
-                "④ 등록 마무리 (자동):",
+                "③ 등록 마무리 (자동):",
                 "   [자동] 정답표를 view_answer_sheet(filename=...)로 읽고 "
                 "set_answers(exam_id, answers_json)로 정답·배점 입력",
             ],
-            "비고": "저작권 정책 변경 이후 서울·부산·인천 등 교육청은 학평 문제지를 게시하지 않습니다"
-                    f" (2026-07 확인). {_PRIVATE_NOTE}",
+            "비고": "출제 교육청 4곳(서울·부산·인천·경기) 전수 확인 결과 학평 문제지 공개 게시는 없습니다 "
+                    "- 통계·채점 자료만 게시하며, 인천의 과거 문답지 게시글도 정리되었습니다 (2026-07 재확인). "
+                    f"{_PRIVATE_NOTE}",
         }
 
     return {
